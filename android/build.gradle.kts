@@ -37,6 +37,17 @@ subprojects {
         tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
             compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
+        // camera_android_camerax puxa camera-core 1.5.3, que anota campos com
+        // jspecify referenciando androidx.concurrent.futures.CallbackToFutureAdapter
+        // mas so expoe concurrent-futures como implementation: o tipo nao chega
+        // ao classpath de compilacao do plugin e o javac falha ("class file ...
+        // CallbackToFutureAdapter not found"). Injeta a dependencia no proprio
+        // modulo do plugin para resolver a compilacao.
+        if (project.name == "camera_android_camerax") {
+            dependencies {
+                add("implementation", "androidx.concurrent:concurrent-futures:1.2.0")
+            }
+        }
     }
 }
 

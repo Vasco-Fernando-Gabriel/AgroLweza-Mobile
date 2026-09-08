@@ -5,6 +5,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'angola_regions.dart';
+import 'camera_capture_screen.dart';
 import 'history_item.dart';
 import 'history_repository.dart';
 import 'inference_service.dart';
@@ -91,6 +93,15 @@ class AgroiaApp extends StatelessWidget {
   }
 }
 
+/// URL base do backend de sincronizacao. Configuravel no build sem tocar no
+/// codigo: `flutter run --dart-define=SYNC_BASE_URL=http://192.168.1.10:8080`.
+/// O default aponta para o host da maquina visto de dentro do emulador Android
+/// (10.0.2.2), onde corre o servidor de teste durante a fase 2.
+const _syncBaseUrl = String.fromEnvironment(
+  'SYNC_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8080',
+);
+
 enum AppScreen { home, result, history }
 
 /// Cor e ícone associados ao tom do diagnóstico (good | warn | neutral).
@@ -118,12 +129,20 @@ class _HomePageState extends State<HomePage> {
   final _repository = HistoryRepository();
   final _picker = ImagePicker();
   final _inference = InferenceService();
-  final SyncTransport _syncTransport = const SimulatedSyncTransport();
+  final SyncTransport _syncTransport = HttpSyncTransport(
+    endpoint: Uri.parse('$_syncBaseUrl/v1/diagnosticos'),
+  );
 
   AppScreen _screen = AppScreen.home;
   String _crop = '';
+  String _province = '';
+  String _municipality = '';
   String _imageName = '';
   File? _imageFile;
+
+  /// Moldura usada na captura, quando a foto veio da câmara-guia. Fica null
+  /// para fotos escolhidas da galeria, que não têm enquadramento conhecido.
+  CaptureFraming? _framing;
   HistoryItem? _result;
   List<HistoryItem> _history = [];
   String _syncMessage = '';
@@ -202,6 +221,23 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _imageName = file.name;
         _imageFile = File(file.path);
+        _framing = null;
+        _analyzeError = null;
+      });
+    }
+  }
+
+  // Abre a camera propria com moldura-guia em vez da camera nativa, para
+  // empurrar o utilizador para o enquadramento aproximado de uma folha.
+  Future<void> _captureWithGuide() async {
+    final shot = await Navigator.of(context).push<GuidedShot?>(
+      MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
+    );
+    if (shot != null && mounted) {
+      setState(() {
+        _imageName = shot.file.name;
+        _imageFile = File(shot.file.path);
+        _framing = shot.framing;
         _analyzeError = null;
       });
     }
@@ -228,20 +264,84 @@ class _HomePageState extends State<HomePage> {
               ListTile(
                 leading: const CircleAvatar(child: Icon(Icons.photo_camera)),
                 title: const Text('Tirar fotografia'),
+                subtitle: const Text('Com moldura para enquadrar a folha'),
                 onTap: () {
                   Navigator.pop(context);
-                  _pickImage(ImageSource.camera);
+                  _captureWithGuide();
                 },
               ),
               ListTile(
                 leading: const CircleAvatar(child: Icon(Icons.photo_library)),
                 title: const Text('Escolher da galeria'),
+                subtitle: const Text('Veja como escolher uma boa foto'),
                 onTap: () {
                   Navigator.pop(context);
-                  _pickImage(ImageSource.gallery);
+                  _showGalleryGuide();
                 },
               ),
               const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // A galeria nativa nao aceita moldura por cima, entao ensinamos ANTES de
+  // abrir: exemplo "assim sim / assim nao" apoiado em icones grandes e cor
+  // (verde/vermelho), para funcionar com quem le pouco.
+  void _showGalleryGuide() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Escolha uma boa fotografia',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Uma folha de perto dá um resultado mais fiável do que a planta inteira.',
+                style: TextStyle(color: Colors.black54, fontSize: 14),
+              ),
+              const SizedBox(height: 20),
+              const Row(
+                children: [
+                  Expanded(
+                    child: _GalleryExample(
+                      good: true,
+                      icon: Icons.eco,
+                      caption: 'Uma folha, de perto',
+                    ),
+                  ),
+                  SizedBox(width: 14),
+                  Expanded(
+                    child: _GalleryExample(
+                      good: false,
+                      icon: Icons.forest,
+                      caption: 'Planta inteira, de longe',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Escolher foto'),
+              ),
             ],
           ),
         ),
@@ -259,7 +359,7 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final result = await _inference.classify(imageFile);
+      final result = await _inference.classify(imageFile, framing: _framing);
       // Confiança abaixo do limite seguro: recusa o diagnóstico específico
       // em vez de arriscar mostrar uma classe errada.
       final diagnosisId = result.confidence >= InferenceService.abstentionThreshold
@@ -273,6 +373,8 @@ class _HomePageState extends State<HomePage> {
           diagnosisId: diagnosisId,
           confidence: result.confidence,
           crop: _crop,
+          province: _province,
+          municipality: _municipality,
           createdAt: DateTime.now(),
           syncStatus: SyncStatus.pending,
         );
@@ -452,7 +554,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildHome() {
-    final canAnalyze = _crop.isNotEmpty && _imageName.isNotEmpty;
+    final canAnalyze = _crop.isNotEmpty &&
+        _province.isNotEmpty &&
+        _municipality.isNotEmpty &&
+        _imageName.isNotEmpty;
+    final municipios = municipalitiesOf(_province);
     final scheme = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
@@ -489,7 +595,60 @@ class _HomePageState extends State<HomePage> {
           onChanged: (value) => setState(() => _crop = value ?? ''),
         ),
         const SizedBox(height: 28),
-        _StepLabel(number: 2, text: 'Fotografe a planta'),
+        _StepLabel(number: 2, text: 'Onde está a planta'),
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          initialValue: _province.isEmpty ? null : _province,
+          hint: const Text('Selecionar província'),
+          icon: const Icon(Icons.expand_more_rounded),
+          isExpanded: true,
+          items: [
+            for (final p in angolaProvinces)
+              DropdownMenuItem(
+                value: p,
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined, size: 20),
+                    const SizedBox(width: 10),
+                    Text(p),
+                  ],
+                ),
+              ),
+          ],
+          // Trocar de província invalida o município já escolhido.
+          onChanged: (value) => setState(() {
+            _province = value ?? '';
+            _municipality = '';
+          }),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: _municipality.isEmpty ? null : _municipality,
+          hint: Text(_province.isEmpty
+              ? 'Escolha a província primeiro'
+              : 'Selecionar município'),
+          icon: const Icon(Icons.expand_more_rounded),
+          isExpanded: true,
+          items: [
+            for (final m in municipios)
+              DropdownMenuItem(
+                value: m,
+                child: Row(
+                  children: [
+                    const Icon(Icons.pin_drop_outlined, size: 20),
+                    const SizedBox(width: 10),
+                    Text(m),
+                  ],
+                ),
+              ),
+          ],
+          // Sem província escolhida não há municípios para listar.
+          onChanged: municipios.isEmpty
+              ? null
+              : (value) => setState(() => _municipality = value ?? ''),
+        ),
+        const SizedBox(height: 28),
+        _StepLabel(number: 3, text: 'Fotografe a planta'),
         const SizedBox(height: 10),
         InkWell(
           onTap: _showImageSourceSheet,
@@ -910,6 +1069,64 @@ class _StepLabel extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Text(text, style: Theme.of(context).textTheme.titleMedium),
+      ],
+    );
+  }
+}
+
+/// Cartao de exemplo "assim sim / assim nao" do guia da galeria. Comunica por
+/// icone + cor + selo (check verde / cruz vermelha) para leitores com pouca
+/// alfabetizacao, com a legenda so a reforcar.
+class _GalleryExample extends StatelessWidget {
+  final bool good;
+  final IconData icon;
+  final String caption;
+
+  const _GalleryExample({
+    required this.good,
+    required this.icon,
+    required this.caption,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = good ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
+    return Column(
+      children: [
+        AspectRatio(
+          aspectRatio: 1,
+          child: Container(
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: color, width: 2),
+            ),
+            child: Stack(
+              children: [
+                Center(child: Icon(icon, size: 52, color: color)),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                    child: Icon(
+                      good ? Icons.check : Icons.close,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          caption,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 13),
+        ),
       ],
     );
   }

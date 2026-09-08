@@ -26,6 +26,10 @@ class HistoryItem {
   final String diagnosisId;
   final double confidence;
   final String crop;
+  /// Local onde o diagnostico foi feito. Vazio nos registos gravados antes de
+  /// o campo existir (migracao) ou se ainda nao foi escolhido.
+  final String province;
+  final String municipality;
   final DateTime createdAt;
   final String syncStatus;
 
@@ -34,6 +38,8 @@ class HistoryItem {
     required this.diagnosisId,
     required this.confidence,
     required this.crop,
+    this.province = '',
+    this.municipality = '',
     required this.createdAt,
     required this.syncStatus,
   });
@@ -59,6 +65,8 @@ class HistoryItem {
         diagnosisId: diagnosisId,
         confidence: confidence,
         crop: crop,
+        province: province,
+        municipality: municipality,
         createdAt: createdAt,
         syncStatus: syncStatus ?? this.syncStatus,
       );
@@ -68,6 +76,8 @@ class HistoryItem {
         'diagnosisId': diagnosisId,
         'confidence': confidence,
         'crop': crop,
+        'province': province,
+        'municipality': municipality,
         'createdAt': createdAt.toIso8601String(),
         'syncStatus': syncStatus,
       };
@@ -85,6 +95,9 @@ class HistoryItem {
       diagnosisId: diagnosisId,
       confidence: (json['confidence'] as num).toDouble(),
       crop: json['crop'] as String,
+      // Registos antigos nao tinham localizacao: assume vazio, nao descarta.
+      province: json['province'] as String? ?? '',
+      municipality: json['municipality'] as String? ?? '',
       createdAt: createdAt,
       syncStatus: json['syncStatus'] as String,
     );

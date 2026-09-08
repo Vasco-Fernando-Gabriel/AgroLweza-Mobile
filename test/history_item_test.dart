@@ -25,6 +25,28 @@ void main() {
       final b = HistoryItem.fromJson(Map<String, dynamic>.from(legacy));
       expect(a.id, b.id);
     });
+
+    test('registo sem localizacao migra com provincia/municipio vazios', () {
+      final item = HistoryItem.fromJson(Map<String, dynamic>.from(legacy));
+      expect(item.province, '');
+      expect(item.municipality, '');
+    });
+  });
+
+  test('round-trip preserva provincia e municipio', () {
+    final original = HistoryItem(
+      id: HistoryItem.newId(),
+      diagnosisId: 'healthy',
+      confidence: 0.9,
+      crop: 'mandioca',
+      province: 'Huíla',
+      municipality: 'Lubango',
+      createdAt: DateTime.parse('2026-08-21T09:34:00.000'),
+      syncStatus: SyncStatus.pending,
+    );
+    final restored = HistoryItem.fromJson(original.toJson());
+    expect(restored.province, 'Huíla');
+    expect(restored.municipality, 'Lubango');
   });
 
   test('round-trip preserva o id', () {
