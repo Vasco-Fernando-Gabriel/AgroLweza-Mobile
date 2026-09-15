@@ -104,7 +104,14 @@ const _syncBaseUrl = String.fromEnvironment(
 
 enum AppScreen { home, result, history }
 
-/// Cor e ícone associados ao tom do diagnóstico (good | warn | neutral).
+/// Cor e ícone associados ao tom do diagnóstico (ok | warn | neutral).
+///
+/// Não existe tom "está tudo bem". O melhor caso que o modelo consegue
+/// produzir é "não encontrei as doenças que conheço", que não é o mesmo que a
+/// planta estar sã — ver a nota no `healthy` do [diagnosisCatalog]. Como o
+/// agricultor lê primeiro o ícone e a cor, e só depois o texto, esse melhor
+/// caso usa um visto VAZADO: continua a não alarmar, mas não é o selo
+/// preenchido que se dá a uma planta certificada como saudável.
 class ToneVisual {
   final Color color;
   final IconData icon;
@@ -112,7 +119,7 @@ class ToneVisual {
   const ToneVisual(this.color, this.icon);
 
   static ToneVisual of(String tone) => switch (tone) {
-        'good' => const ToneVisual(Color(0xFF2E7D32), Icons.check_circle),
+        'ok' => const ToneVisual(Color(0xFF2E7D32), Icons.check_circle_outline),
         'warn' => const ToneVisual(Color(0xFFE59500), Icons.warning_rounded),
         _ => const ToneVisual(Color(0xFF6B6B6B), Icons.help_rounded),
       };
@@ -772,7 +779,13 @@ class _HomePageState extends State<HomePage> {
           'O resultado não é conclusivo. Tire outra foto mais nítida, só da folha, para confirmar.';
     } else {
       final visual = ToneVisual.of(fixture.tone);
-      statusLabel = fixture.tone == 'good' ? 'SAUDÁVEL' : 'POSSÍVEL DOENÇA';
+      // "SEM SINAIS" e não "SAUDÁVEL": o crachá é a primeira coisa que o
+      // agricultor lê, e o modelo não tem como afirmar que a planta está sã.
+      statusLabel = switch (fixture.tone) {
+        'ok' => 'SEM SINAIS',
+        'warn' => 'POSSÍVEL DOENÇA',
+        _ => 'NÃO CONFIRMADO',
+      };
       color = visual.color;
       icon = visual.icon;
       title = fixture.label;

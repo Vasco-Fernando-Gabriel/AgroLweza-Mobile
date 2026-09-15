@@ -21,14 +21,27 @@ class DiagnosisInfo {
 }
 
 const Map<String, DiagnosisInfo> diagnosisCatalog = {
+  // ATENÇÃO antes de "melhorar" este texto de volta para "Planta saudável":
+  // o modelo NÃO sabe dizer que uma planta está sã. Só sabe dizer que não
+  // encontrou as doenças que lhe ensinámos. Medido a 2026-09-15 com o modelo
+  // do feijão contra folhas de outras culturas: uma folha de milho COM
+  // ferrugem foi classificada como saudável em 78% dos casos, e folhas sãs de
+  // batata, soja e videira deram confiança 0.99-1.00. Fora das classes
+  // conhecidas, "saudável" é o balde onde cai tudo o que o modelo não percebe.
+  // Prometer saúde aqui faz o agricultor não tratar e perder a lavra.
   'healthy': DiagnosisInfo(
     id: 'healthy',
-    label: 'Planta aparentemente saudável',
-    severity: 'Baixa',
-    tone: 'good',
-    observations: ['Folhas sem sinais relevantes'],
+    label: 'Sem sinais das doenças que sei reconhecer',
+    severity: 'Indefinida',
+    tone: 'ok',
+    observations: [
+      'Não encontrei nesta folha as doenças que fui treinado a reconhecer',
+      'Isto NÃO garante que a planta esteja sã: há doenças e pragas que ainda '
+          'não sei identificar',
+    ],
     recommendation:
-        'Continue a acompanhar a plantação e mantenha boas práticas de campo.',
+        'Continue a acompanhar a plantação. Se a planta piorar, ou se vir '
+        'sinais que esta análise não explica, procure um técnico agrícola.',
   ),
   'cassava_mosaic': DiagnosisInfo(
     id: 'cassava_mosaic',
