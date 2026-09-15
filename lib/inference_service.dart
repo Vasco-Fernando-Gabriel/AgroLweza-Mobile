@@ -63,6 +63,42 @@ Rect? frameToImageRect({
   return Rect.fromLTWH(left, top, width, height);
 }
 
+/// Confere que o modelo carregado e o ficheiro de etiquetas são o mesmo par.
+///
+/// O buffer de saída da inferência é dimensionado pelo número de etiquetas, e
+/// o índice da classe vencedora é usado para indexar essa lista. Se o `.tflite`
+/// de uma cultura for emparelhado com o `.txt` de outra, na melhor das
+/// hipóteses rebenta; na pior, alinha mal e devolve em silêncio o nome de
+/// outra doença — o agricultor trata a praga errada e nunca ninguém percebe.
+/// Por isso falha-se aqui, cedo e com contexto, em vez de deixar o erro seguir.
+///
+/// [outputShape] vem do tensor de saída do modelo e deve ser `[1, N]`.
+void assertModelMatchesLabels({
+  required List<int> outputShape,
+  required List<String> labels,
+  required String modelAsset,
+  required String labelsAsset,
+}) {
+  if (outputShape.length != 2 || outputShape[0] != 1 || outputShape[1] <= 0) {
+    throw StateError(
+      'Modelo $modelAsset com saída inesperada $outputShape. '
+      'Esperado [1, N] com N classes.',
+    );
+  }
+  if (labels.isEmpty) {
+    throw StateError('Ficheiro de etiquetas $labelsAsset está vazio.');
+  }
+  final classes = outputShape[1];
+  if (labels.length != classes) {
+    throw StateError(
+      'Modelo e etiquetas não correspondem: $modelAsset devolve $classes '
+      'classes, mas $labelsAsset tem ${labels.length} '
+      '(${labels.join(', ')}). O .tflite e o .txt parecem ser de culturas '
+      'diferentes.',
+    );
+  }
+}
+
 /// Resultado bruto de uma inferência: classe mais provável, a sua confiança
 /// (softmax) e o vetor completo de probabilidades por classe.
 class InferenceResult {
@@ -129,6 +165,12 @@ class InferenceService {
           .where((e) => e.isNotEmpty)
           .toList();
     }
+    assertModelMatchesLabels(
+      outputShape: _interpreter!.getOutputTensor(0).shape,
+      labels: _labels,
+      modelAsset: _modelAsset,
+      labelsAsset: _labelsAsset,
+    );
   }
 
   /// Lê a resolução de entrada do modelo a partir do tensor de entrada.
