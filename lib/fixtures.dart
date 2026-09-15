@@ -88,6 +88,53 @@ const Map<String, DiagnosisInfo> diagnosisCatalog = {
     recommendation:
         'Observe a evolução nas próximas semanas e informe um técnico se piorar.',
   ),
+  // ---- FEIJÃO (modelo agrolweza_beans_v2, classes do ficheiro de etiquetas)
+  // Mesma ressalva do 'healthy' acima: o modelo não atesta saúde, só diz que
+  // não viu o que conhece. Só conhece ferrugem e mancha angular; antracnose,
+  // crestamento bacteriano e mosaico BCMV ainda não estão treinados (AGL-15).
+  'saudavel': DiagnosisInfo(
+    id: 'saudavel',
+    label: 'Sem sinais das doenças que sei reconhecer',
+    severity: 'Indefinida',
+    tone: 'ok',
+    observations: [
+      'Não encontrei ferrugem nem mancha angular nesta folha',
+      'Isto NÃO garante que a planta esteja sã: há doenças do feijão que ainda '
+          'não sei identificar',
+    ],
+    recommendation:
+        'Continue a acompanhar a plantação. Se a planta piorar, ou se vir '
+        'sinais que esta análise não explica, procure um técnico agrícola.',
+  ),
+  'ferrugem': DiagnosisInfo(
+    id: 'ferrugem',
+    label: 'Possível ferrugem do feijoeiro',
+    severity: 'Moderada',
+    tone: 'warn',
+    observations: [
+      'Pústulas pequenas e salientes, cor de ferrugem, sobretudo na página '
+          'inferior da folha',
+      'Em volta de cada pústula pode haver um halo amarelado',
+    ],
+    recommendation:
+        'Mostre a folha a um técnico agrícola antes de aplicar qualquer '
+        'produto. Evite molhar a folhagem na rega e não trabalhe na plantação '
+        'com as plantas ainda molhadas.',
+  ),
+  'mancha_angular': DiagnosisInfo(
+    id: 'mancha_angular',
+    label: 'Possível mancha angular do feijoeiro',
+    severity: 'Moderada',
+    tone: 'warn',
+    observations: [
+      'Manchas de contorno angular, limitadas pelas nervuras da folha',
+      'Podem juntar-se e secar, e a folha cai antes do tempo',
+    ],
+    recommendation:
+        'Mostre a folha a um técnico agrícola antes de aplicar qualquer '
+        'produto. Não reaproveite sementes de plantas afetadas e retire os '
+        'restos da cultura anterior do terreno.',
+  ),
   'unknown': DiagnosisInfo(
     id: 'unknown',
     label: 'Não foi possível confirmar com segurança',

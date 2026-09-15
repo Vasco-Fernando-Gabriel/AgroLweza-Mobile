@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'angola_regions.dart';
 import 'camera_capture_screen.dart';
+import 'crops.dart';
 import 'history_item.dart';
 import 'history_repository.dart';
 import 'inference_service.dart';
@@ -103,6 +104,14 @@ const _syncBaseUrl = String.fromEnvironment(
 );
 
 enum AppScreen { home, result, history }
+
+/// Ícone de cada cultura no seletor. Fica na UI e não em [cropCatalog] para
+/// manter o registo de culturas em Dart puro, testável sem plataforma.
+IconData _cropIcon(String cropId) => switch (cropId) {
+      'feijao' => Icons.spa_rounded,
+      'mandioca' => Icons.grass,
+      _ => Icons.eco_rounded,
+    };
 
 /// Cor e ícone associados ao tom do diagnóstico (ok | warn | neutral).
 ///
@@ -366,10 +375,19 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final result = await _inference.classify(imageFile, framing: _framing);
+      final crop = cropCatalog[_crop];
+      if (crop == null) {
+        throw StateError('Cultura desconhecida: "$_crop".');
+      }
+      final result = await _inference.classify(
+        imageFile,
+        crop: crop,
+        framing: _framing,
+      );
       // Confiança abaixo do limite seguro: recusa o diagnóstico específico
-      // em vez de arriscar mostrar uma classe errada.
-      final diagnosisId = result.confidence >= InferenceService.abstentionThreshold
+      // em vez de arriscar mostrar uma classe errada. O limiar é da cultura,
+      // não global: depende da calibração de cada modelo.
+      final diagnosisId = result.confidence >= crop.abstentionThreshold
           ? result.classId
           : 'unknown';
 
@@ -587,17 +605,18 @@ class _HomePageState extends State<HomePage> {
           initialValue: _crop.isEmpty ? null : _crop,
           hint: const Text('Selecionar cultura'),
           icon: const Icon(Icons.expand_more_rounded),
-          items: const [
-            DropdownMenuItem(
-              value: 'mandioca',
-              child: Row(
-                children: [
-                  Icon(Icons.grass, size: 20),
-                  SizedBox(width: 10),
-                  Text('Mandioca'),
-                ],
+          items: [
+            for (final crop in cropCatalog.values)
+              DropdownMenuItem(
+                value: crop.id,
+                child: Row(
+                  children: [
+                    Icon(_cropIcon(crop.id), size: 20),
+                    const SizedBox(width: 10),
+                    Text(crop.label),
+                  ],
+                ),
               ),
-            ),
           ],
           onChanged: (value) => setState(() => _crop = value ?? ''),
         ),
@@ -763,7 +782,12 @@ class _HomePageState extends State<HomePage> {
     final IconData icon;
     final String title;
     final String guidance;
-    if (result.confidence < InferenceService.abstentionThreshold) {
+    // Limiar da cultura do PRÓPRIO registo, não do que está selecionado agora:
+    // o histórico mostra resultados antigos e cada um foi julgado pelo limiar
+    // da sua cultura.
+    final abstentionThreshold =
+        cropCatalog[result.crop]?.abstentionThreshold ?? 0.6;
+    if (result.confidence < abstentionThreshold) {
       statusLabel = 'RECUSA SEGURA';
       color = const Color(0xFF6B6B6B);
       icon = Icons.help_rounded;
@@ -862,7 +886,10 @@ class _HomePageState extends State<HomePage> {
                       child: _InfoTile(label: 'Gravidade', value: fixture.severity),
                     ),
                     Expanded(
-                      child: _InfoTile(label: 'Cultura', value: 'Mandioca'),
+                      child: _InfoTile(
+                        label: 'Cultura',
+                        value: cropLabelFor(result.crop),
+                      ),
                     ),
                   ],
                 ),

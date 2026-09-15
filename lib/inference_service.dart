@@ -6,6 +6,8 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
+import 'crops.dart';
+
 /// Geometria da moldura-guia no momento em que a fotografia foi tirada.
 ///
 /// A moldura desenhada no ecra so tem valor se o recorte dela chegar ao
@@ -120,16 +122,12 @@ class InferenceResult {
 /// cultura tem o seu modelo. Os pixels entram crus em `[0, 255]` — ver a nota
 /// em [classify] antes de mexer nisso.
 class InferenceService {
-  static const _modelAsset = 'assets/models/agrolweza_cassava_baseline.tflite';
-  static const _labelsAsset = 'assets/models/agrolweza_class_labels.txt';
-
-  /// Abaixo deste valor, o app deve recusar o diagnóstico específico e pedir
-  /// nova fotografia em vez de arriscar uma classe errada.
-  static const abstentionThreshold = 0.6;
-
   Interpreter? _interpreter;
   List<String> _labels = const [];
   int? _inputSize;
+
+  /// Cultura cujo modelo está neste momento carregado, ou null se ainda nenhum.
+  Crop? _loadedCrop;
 
   /// Lado do quadrado que o modelo espera à entrada, lido do próprio `.tflite`.
   /// Não é constante: cada cultura tem o seu modelo e as resoluções diferem
@@ -144,9 +142,18 @@ class InferenceService {
     return size;
   }
 
-  Future<void> _ensureLoaded() async {
+  /// Garante que o modelo da [crop] pedida está carregado.
+  ///
+  /// Mantém-se UM modelo de cada vez: ao trocar de cultura larga-se o anterior
+  /// em vez de deixar os dois residentes. Custa uns milissegundos na troca, que
+  /// é rara (escolhe-se a cultura uma vez), e poupa memória nativa nos
+  /// telemóveis baratos que são o alvo do app.
+  Future<void> _ensureLoaded(Crop crop) async {
+    if (_loadedCrop != null && _loadedCrop!.id != crop.id) {
+      _releaseModel();
+    }
     if (_interpreter == null) {
-      final interpreter = await Interpreter.fromAsset(_modelAsset);
+      final interpreter = await Interpreter.fromAsset(crop.modelAsset);
       try {
         _inputSize = _readInputSize(interpreter);
       } catch (_) {
@@ -158,7 +165,7 @@ class InferenceService {
       _interpreter = interpreter;
     }
     if (_labels.isEmpty) {
-      final raw = await rootBundle.loadString(_labelsAsset);
+      final raw = await rootBundle.loadString(crop.labelsAsset);
       _labels = raw
           .split('\n')
           .map((e) => e.trim())
@@ -168,9 +175,19 @@ class InferenceService {
     assertModelMatchesLabels(
       outputShape: _interpreter!.getOutputTensor(0).shape,
       labels: _labels,
-      modelAsset: _modelAsset,
-      labelsAsset: _labelsAsset,
+      modelAsset: crop.modelAsset,
+      labelsAsset: crop.labelsAsset,
     );
+    _loadedCrop = crop;
+  }
+
+  /// Larga o modelo carregado e todo o estado que dele deriva.
+  void _releaseModel() {
+    _interpreter?.close();
+    _interpreter = null;
+    _inputSize = null;
+    _labels = const [];
+    _loadedCrop = null;
   }
 
   /// Lê a resolução de entrada do modelo a partir do tensor de entrada.
@@ -190,14 +207,15 @@ class InferenceService {
     return shape[1];
   }
 
-  /// Classifica [imageFile]. Quando a fotografia veio da câmara com
-  /// moldura-guia, [framing] traz a geometria dessa moldura e só o que estava
-  /// lá dentro é entregue ao modelo.
+  /// Classifica [imageFile] com o modelo da [crop] indicada. Quando a
+  /// fotografia veio da câmara com moldura-guia, [framing] traz a geometria
+  /// dessa moldura e só o que estava lá dentro é entregue ao modelo.
   Future<InferenceResult> classify(
     File imageFile, {
+    required Crop crop,
     CaptureFraming? framing,
   }) async {
-    await _ensureLoaded();
+    await _ensureLoaded(crop);
 
     final bytes = await imageFile.readAsBytes();
     final decoded = img.decodeImage(bytes);
@@ -273,9 +291,5 @@ class InferenceService {
     );
   }
 
-  void dispose() {
-    _interpreter?.close();
-    _interpreter = null;
-    _inputSize = null;
-  }
+  void dispose() => _releaseModel();
 }
