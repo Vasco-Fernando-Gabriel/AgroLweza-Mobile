@@ -77,12 +77,15 @@ class InferenceResult {
   });
 }
 
-/// Roda o modelo Agrolweza (MobileNetV3Small, treinado no Colab) localmente
-/// no dispositivo via TFLite. Sem chamadas de rede.
+/// Roda um modelo Agrolweza (treinado no Colab) localmente no dispositivo via
+/// TFLite. Sem chamadas de rede.
+///
+/// Não assume a resolução de entrada: lê-a do `.tflite` carregado, porque cada
+/// cultura tem o seu modelo. Os pixels entram crus em `[0, 255]` — ver a nota
+/// em [classify] antes de mexer nisso.
 class InferenceService {
   static const _modelAsset = 'assets/models/agrolweza_cassava_baseline.tflite';
   static const _labelsAsset = 'assets/models/agrolweza_class_labels.txt';
-  static const inputSize = 224;
 
   /// Abaixo deste valor, o app deve recusar o diagnóstico específico e pedir
   /// nova fotografia em vez de arriscar uma classe errada.
@@ -90,9 +93,34 @@ class InferenceService {
 
   Interpreter? _interpreter;
   List<String> _labels = const [];
+  int? _inputSize;
+
+  /// Lado do quadrado que o modelo espera à entrada, lido do próprio `.tflite`.
+  /// Não é constante: cada cultura tem o seu modelo e as resoluções diferem
+  /// (mandioca 224, feijão 320). Só está disponível depois de [_ensureLoaded].
+  int get inputSize {
+    final size = _inputSize;
+    if (size == null) {
+      throw StateError(
+        'inputSize só existe depois de o modelo estar carregado.',
+      );
+    }
+    return size;
+  }
 
   Future<void> _ensureLoaded() async {
-    _interpreter ??= await Interpreter.fromAsset(_modelAsset);
+    if (_interpreter == null) {
+      final interpreter = await Interpreter.fromAsset(_modelAsset);
+      try {
+        _inputSize = _readInputSize(interpreter);
+      } catch (_) {
+        // Modelo incompatível: fecha o interpreter antes de propagar, senão
+        // fica memória nativa presa sem ninguém para lhe chamar close().
+        interpreter.close();
+        rethrow;
+      }
+      _interpreter = interpreter;
+    }
     if (_labels.isEmpty) {
       final raw = await rootBundle.loadString(_labelsAsset);
       _labels = raw
@@ -101,6 +129,23 @@ class InferenceService {
           .where((e) => e.isNotEmpty)
           .toList();
     }
+  }
+
+  /// Lê a resolução de entrada do modelo a partir do tensor de entrada.
+  /// O shape é `[1, altura, largura, canais]`; exigimos imagem quadrada RGB
+  /// porque é isso que o pipeline de recorte e redimensionamento produz.
+  int _readInputSize(Interpreter interpreter) {
+    final shape = interpreter.getInputTensor(0).shape;
+    if (shape.length != 4 ||
+        shape[1] != shape[2] ||
+        shape[3] != 3 ||
+        shape[1] <= 0) {
+      throw StateError(
+        'Modelo com entrada inesperada $shape. '
+        'Esperado [1, N, N, 3] (imagem quadrada RGB).',
+      );
+    }
+    return shape[1];
   }
 
   /// Classifica [imageFile]. Quando a fotografia veio da câmara com
@@ -189,5 +234,6 @@ class InferenceService {
   void dispose() {
     _interpreter?.close();
     _interpreter = null;
+    _inputSize = null;
   }
 }
